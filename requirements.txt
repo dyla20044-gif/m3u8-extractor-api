@@ -1,0 +1,3 @@
+Flask
+yt-dlp
+gunicorn # Servidor web para producción
