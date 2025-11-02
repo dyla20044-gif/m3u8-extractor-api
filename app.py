@@ -6,7 +6,7 @@ from playwright.async_api import async_playwright
 
 app = Flask(__name__)
 
-# Necesitamos una variable global para almacenar el URL m3u8 que Playwright captura
+# Variable global para almacenar el URL m3u8 capturado por el listener
 m3u8_url_global = None
 
 # --- Función Asíncrona de Extracción con Playwright ---
@@ -16,42 +16,59 @@ async def extract_m3u8_url_async(video_url):
     
     # 1. Iniciar Playwright y el navegador Chrome
     async with async_playwright() as p:
-        # Usamos el modo headless para que el navegador no se abra visualmente
-        browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context()
-        page = await context.new_page()
-
-        # 2. Configurar el monitoreo del tráfico de red (Listener)
-        def log_request(request):
-            global m3u8_url_global
-            url = request.url
-            # Buscamos enlaces que terminen en .m3u8 y excluimos los segmentos individuales
-            if ".m3u8" in url and "chunklist" not in url:
-                if not m3u8_url_global:
-                    m3u8_url_global = url
-                    
-        page.on("request", log_request)
-        
-        # 3. Navegar y forzar el inicio del streaming (con clic)
         try:
+            # Lanzamos el navegador en modo headless
+            browser = await p.chromium.launch(headless=True)
+            context = await browser.new_context()
+            page = await context.new_page()
+
+            # 2. Configurar el monitoreo del tráfico de red (Listener)
+            def log_request(request):
+                global m3u8_url_global
+                url = request.url
+                # Captura el URL m3u8 y excluye los segmentos de video individuales
+                if ".m3u8" in url and "chunklist" not in url:
+                    if not m3u8_url_global:
+                        m3u8_url_global = url
+                        
+            page.on("request", log_request)
+            
+            # 3. Navegar y forzar el inicio del streaming (Lógica de Iframe y Clic)
             await page.goto(video_url, wait_until="load", timeout=30000)
             
-            # --- Simular Clic en el centro del reproductor para iniciar el streaming ---
-            # Esperamos un selector común para el botón de play
-            await page.wait_for_selector('body', timeout=10000)
-
-            # Hacemos clic en el centro para evitar si está detrás de un iframe o un overlay
-            await page.mouse.click(x=500, y=500)
+            # Búsqueda avanzada del Iframe que contiene el reproductor de video
+            # Usamos un selector amplio que busca iframes con nombres o fuentes relacionadas al video
+            video_iframe = await page.wait_for_selector('iframe[name*="video"], iframe[id*="embed"], iframe[src*="stream"], iframe[src*="filemoon"]', timeout=5000)
             
-            # Esperamos un tiempo prudente para que la solicitud .m3u8 aparezca después del clic
-            await asyncio.sleep(7) 
+            if video_iframe:
+                # Entrar al contexto del Iframe
+                iframe_content = await video_iframe.content_frame()
+                
+                if iframe_content:
+                    # Hacer clic dentro del Iframe para iniciar la reproducción
+                    await iframe_content.mouse.click(x=300, y=300)
+                    
+                    # Esperar 8 segundos para que la solicitud m3u8 se complete
+                    await asyncio.sleep(8) 
+                else:
+                    # Fallback si el iframe está vacío
+                    await page.click('body', force=True, position={'x': 500, 'y': 500})
+                    await asyncio.sleep(5)
+            else:
+                 # Fallback si no se encuentra ningún iframe (clic simple)
+                 await page.click('body', force=True, position={'x': 500, 'y': 500})
+                 await asyncio.sleep(5)
+
 
         except Exception as e:
-            await browser.close()
-            # Devolvemos un error si no se pudo navegar o hacer clic
+            # Captura errores generales de navegación o timeout
             return f"Error de navegación, clic o tiempo de espera: {e}"
             
-        await browser.close()
+        finally:
+            # Asegurarse de que el navegador se cierre SIEMPRE para liberar RAM en el servidor
+            if 'browser' in locals() and browser:
+                await browser.close()
+                
         return m3u8_url_global
 
 # --- Endpoint del API (Flask) ---
@@ -76,5 +93,5 @@ def handle_extract():
 
 # --- Inicio del Servidor ---
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 10000)) # Usar 10000 para Docker
+    port = int(os.environ.get('PORT', 10000)) 
     app.run(host='0.0.0.0', port=port)
