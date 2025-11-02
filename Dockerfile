@@ -1,5 +1,5 @@
 # Usa una imagen base de Python oficial, que es ligera.
-FROM python:3.11-slim
+FROM python:3.11-slim-bullseye
 
 # =========================================================
 # PASO 1: INSTALAR DEPENDENCIAS DEL SISTEMA OPERATIVO
