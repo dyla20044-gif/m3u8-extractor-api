@@ -1,68 +1,71 @@
 import os
 import json
+import asyncio
 from flask import Flask, request, jsonify
-import yt_dlp
+from playwright.async_api import async_playwright
 
 app = Flask(__name__)
 
-# --- Función de Extracción con yt-dlp ---
-def extract_m3u8_url(video_url):
-    """Utiliza yt-dlp para obtener el mejor URL de streaming (m3u8)."""
-    # Configuramos yt-dlp para no descargar, solo extraer metadatos
-    ydl_opts = {
-        'skip_download': True,      
-        'listformats': False,       
-        'format': 'best',           
-        'quiet': True,              
-        'force_generic_extractor': True, # Útil para sitios no reconocidos
-        'noplaylist': True,
-        'default_search': 'ytsearch',
-    }
+# --- Función Asíncrona de Extracción con Playwright (La nueva "receta") ---
+async def extract_m3u8_url_async(video_url):
+    """
+    Inicia un navegador headless para navegar y monitorear el tráfico de red
+    en busca del enlace .m3u8.
+    """
+    m3u8_url = None
+    
+    # 1. Iniciar Playwright y el navegador Chrome
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        context = await browser.new_context()
+        page = await context.new_page()
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # Extraer información del video
-            info_dict = ydl.extract_info(video_url, download=False)
+        # 2. Configurar el monitoreo del tráfico de red
+        def log_request(request):
+            nonlocal m3u8_url
+            url = request.url
+            # Buscamos enlaces que terminen en .m3u8 o contengan hls.
+            if ".m3u8" in url and "chunklist" not in url:
+                if not m3u8_url:
+                    m3u8_url = url
+                    
+        page.on("request", log_request)
+        
+        # 3. Navegar y esperar la carga (El navegador se encargará de ejecutar JS y cargar el video)
+        try:
+            # Puedes ajustar el tiempo de espera si la plataforma tarda en cargar
+            await page.goto(video_url, wait_until="networkidle") 
+            await asyncio.sleep(5) # Dale unos segundos extra para que el reproductor inicie la petición
+
+        except Exception as e:
+            await browser.close()
+            return f"Error de navegación o tiempo de espera: {e}"
             
-            # Buscar el URL m3u8. El mejor formato (HLS) suele estar en 'url' o en 'formats'.
-            
-            # 1. Intentar el URL directo (m3u8)
-            best_url = info_dict.get('url')
-            if best_url and '.m3u8' in best_url:
-                return best_url
-            
-            # 2. Buscar en la lista de formatos
-            for f in info_dict.get('formats', []):
-                # Filtramos por HLS o m3u8
-                if f.get('protocol') == 'hls' or (f.get('url') and '.m3u8' in f['url']):
-                    return f['url']
+        await browser.close()
+        return m3u8_url
 
-            return "URL de streaming no encontrado."
-
-    except Exception as e:
-        return f"Error de yt-dlp: {str(e)}"
-
-# --- Endpoint del API ---
+# --- Adaptación de Flask (El Endpoint debe ser síncrono) ---
+# Flask no es naturalmente asíncrono, por lo que usamos asyncio para ejecutar la función Playwright.
 @app.route('/extract', methods=['POST'])
 def handle_extract():
-    # Asegurarse de que el request tiene el formato correcto
     data = request.get_json()
     if not data or 'url' not in data:
         return jsonify({"error": "Falta el campo 'url' en el cuerpo de la solicitud."}), 400
 
     video_url = data['url']
     
-    # Llamar a la función de extracción
-    m3u8_link = extract_m3u8_url(video_url)
+    # Ejecutamos la función asíncrona de extracción
+    m3u8_link = asyncio.run(extract_m3u8_url_async(video_url))
 
     # Devolver el resultado
-    if "Error" in m3u8_link or "no encontrado" in m3u8_link:
-        return jsonify({"status": "error", "m3u8_url": None, "message": m3u8_link}), 500
-    else:
+    if m3u8_link and isinstance(m3u8_link, str) and ("Error" not in m3u8_link) and ("http" in m3u8_link):
         return jsonify({"status": "success", "m3u8_url": m3u8_link, "original_url": video_url}), 200
+    else:
+        # En caso de no encontrar nada o si hay un error
+        message = m3u8_link if m3u8_link and "Error" in m3u8_link else "No se pudo detectar el enlace .m3u8 mediante simulación de navegador."
+        return jsonify({"status": "error", "m3u8_url": None, "message": message}), 500
 
 # --- Inicio del Servidor ---
 if __name__ == '__main__':
-    # Usar el puerto que asigne el entorno de despliegue, o 5000 por defecto
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
