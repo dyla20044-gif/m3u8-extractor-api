@@ -1,35 +1,23 @@
-# Usa una imagen base de Python que ya tenga las dependencias comunes
-FROM python:3.11-slim
-
 # Instalar las dependencias de Playwright que permiten el headless
+# Usamos las dependencias recomendadas para Debian moderno, eliminando las obsoletas.
 RUN apt-get update && apt-get install -y \
+    python3-venv \
+    libglib2.0-0 \
     libnss3 \
-    libatk1.0-0 \
-    libatk-bridge2.0-0 \
-    libcups2 \
-    libdrm2 \
-    libgbm1 \
-    libgconf-2-4 \
+    libgdk-pixbuf2.0-0 \
     libgtk-3-0 \
-    libxshmfence6 \
+    libgconf-2-4 \
+    libatk-bridge2.0-0 \
+    libxcomposite1 \
+    libxrandr2 \
+    libxkbcommon0 \
+    libxcursor1 \
     libasound2 \
-    libicu-dev \
-    libwebp-dev \
+    libx11-xcb1 \
+    libdbus-1-3 \
+    libxext6 \
+    libxtst6 \
+    libxss1 \
+    libcurl4 \
     --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
-
-# Establece el directorio de trabajo
-WORKDIR /app
-
-# Copia los archivos de requisitos e instala las bibliotecas de Python
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Instalar los binarios de los navegadores de Playwright (¡Esto ahora funciona en Docker!)
-RUN playwright install chromium
-
-# Copia el resto del código de la aplicación
-COPY . .
-
-# Comando para iniciar la aplicación
-CMD ["gunicorn", "app:app", "-b", "0.0.0.0:10000"]
