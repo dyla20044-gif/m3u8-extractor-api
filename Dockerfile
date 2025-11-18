@@ -1,51 +1,23 @@
-# Usa una imagen base de Python estable y compatible con las dependencias de Playwright
-FROM python:3.11-slim-bullseye
+# Usa una imagen base de Python más completa (no 'slim')
+FROM python:3.11-bullseye
 
-# =========================================================
-# PASO 1: INSTALAR DEPENDENCIAS DEL SISTEMA OPERATIVO
-# Se instala un conjunto de librerías esenciales para que Chrome funcione.
-# =========================================================
-RUN apt-get update && apt-get install -y \
-    libnss3 \
-    libatk1.0-0 \
-    libatk-bridge2.0-0 \
-    libcups2 \
-    libdrm2 \
-    libgbm1 \
-    libgtk-3-0 \
-    libasound2 \
-    libicu-dev \
-    libwebp-dev \
-    libglib2.0-0 \
-    libxcomposite1 \
-    libxrandr2 \
-    libxkbcommon0 \
-    libxcursor1 \
-    libdbus-1-3 \
-    libxext6 \
-    libxtst6 \
-    libxss1 \
-    libcurl4 \
-    --no-install-recommends \
-    && rm -rf /var/lib/apt/lists/*
-
-# =========================================================
-# PASO 2: INSTALAR DEPENDENCIAS DE PYTHON Y EL NAVEGADOR
-# =========================================================
 # Establece el directorio de trabajo
 WORKDIR /app
 
-# Copia los archivos de requisitos e instala las bibliotecas de Python
+# Copia los archivos de requisitos
 COPY requirements.txt .
+
+# Instala las bibliotecas de Python (Flask, gunicorn, playwright, yt-dlp)
 RUN pip install --no-cache-dir -r requirements.txt
 
-# ¡CRUCIAL! Instalar los binarios del navegador (Chrome) usando Playwright.
-RUN playwright install chromium
+# --- ¡MODIFICACIÓN CLAVE! ---
+# En lugar de instalar las librerías del sistema a mano,
+# usamos el comando oficial de Playwright para que él
+# instale TODO lo que necesita (Chrome y sus dependencias).
+RUN playwright install --with-deps chromium
 
-# =========================================================
-# PASO 3: INICIAR EL SERVIDOR
-# =========================================================
 # Copia el resto del código (incluyendo app.py)
 COPY . .
-# Comando para iniciar la aplicación con Gunicorn en el puerto 10000 de Render
+
+# Comando para iniciar la aplicación
 CMD ["gunicorn", "app:app", "-b", "0.0.0.0:10000"]
