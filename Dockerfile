@@ -1,22 +1,51 @@
-# Usa una imagen de Python ligera
+# Usa una imagen base de Python estable y compatible con las dependencias de Playwright
 FROM python:3.11-slim-bullseye
 
-# Instalar Python y PIP (ya viene, pero por si acaso)
+# =========================================================
+# PASO 1: INSTALAR DEPENDENCIAS DEL SISTEMA OPERATIVO
+# Se instala un conjunto de librerías esenciales para que Chrome funcione.
+# =========================================================
 RUN apt-get update && apt-get install -y \
-    python3 \
-    python3-pip \
+    libnss3 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libgbm1 \
+    libgtk-3-0 \
+    libasound2 \
+    libicu-dev \
+    libwebp-dev \
+    libglib2.0-0 \
+    libxcomposite1 \
+    libxrandr2 \
+    libxkbcommon0 \
+    libxcursor1 \
+    libdbus-1-3 \
+    libxext6 \
+    libxtst6 \
+    libxss1 \
+    libcurl4 \
     --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
-# Establecer directorio de trabajo
+# =========================================================
+# PASO 2: INSTALAR DEPENDENCIAS DE PYTHON Y EL NAVEGADOR
+# =========================================================
+# Establece el directorio de trabajo
 WORKDIR /app
 
-# Copiar e instalar requisitos (Flask, gunicorn, yt-dlp)
+# Copia los archivos de requisitos e instala las bibliotecas de Python
 COPY requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Copiar el resto de la app (app.py)
+# ¡CRUCIAL! Instalar los binarios del navegador (Chrome) usando Playwright.
+RUN playwright install chromium
+
+# =========================================================
+# PASO 3: INICIAR EL SERVIDOR
+# =========================================================
+# Copia el resto del código (incluyendo app.py)
 COPY . .
-
-# Iniciar el servidor Gunicorn
+# Comando para iniciar la aplicación con Gunicorn en el puerto 10000 de Render
 CMD ["gunicorn", "app:app", "-b", "0.0.0.0:10000"]
