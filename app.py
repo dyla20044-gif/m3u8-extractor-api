@@ -17,7 +17,6 @@ link_url_global = None
 def extract_with_yt_dlp(target_url):
     print(f"[Plan A: yt-dlp] Intentando extracción rápida de: {target_url}")
     
-    # Comando para llamar a yt-dlp
     command = [
         'python3', '-m', 'yt_dlp',
         '-g',                          # Obtener solo la URL
@@ -29,22 +28,25 @@ def extract_with_yt_dlp(target_url):
     
     try:
         # Ejecutar el comando
-        # timeout=20 pone un límite de 20s a todo el proceso
         result = subprocess.run(command, capture_output=True, text=True, check=True, timeout=20)
         
-        # stdout es la salida (el enlace)
-        extracted_link = result.stdout.strip()
+        # stdout puede tener MÚLTIPLES enlaces, uno por línea
+        # Lo separamos por el salto de línea '\n'
+        all_links = result.stdout.strip().split('\n')
         
-        # Verificamos que sea un enlace válido
-        if extracted_link.startswith('http'):
-            print(f"[Plan A: yt-dlp] ¡Éxito! Enlace encontrado: {extracted_link}")
-            return extracted_link
+        # --- ¡MODIFICACIÓN CLAVE! ---
+        # Tomamos solo el PRIMER enlace válido de la lista
+        if all_links and all_links[0].startswith('http'):
+            first_link = all_links[0]
+            print(f"[Plan A: yt-dlp] ¡Éxito! {len(all_links)} enlaces encontrados. Devolviendo el primero: {first_link}")
+            return first_link
         else:
-            return None # No fue un enlace válido
+            print("[Plan A: yt-dlp] yt-dlp se ejecutó pero no devolvió un enlace http.")
+            return None # No se encontró ningún enlace válido
 
     except Exception as e:
         # Fallo de yt-dlp (ej. "Unsupported URL")
-        print(f"[Plan A: yt-dlp] Falló (normal para sitios difíciles).")
+        print(f"[Plan A: yt-dlp] Falló (normal para sitios difíciles o playlists vacías).")
         return None # Indica que el Plan A falló
 
 # ======================================================================
