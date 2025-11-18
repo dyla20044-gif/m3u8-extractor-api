@@ -1,6 +1,7 @@
 import os
 import json
 import asyncio
+import subprocess # ¡Añadido de nuevo para yt-dlp!
 from flask import Flask, request, jsonify
 from playwright.async_api import async_playwright
 
@@ -9,15 +10,55 @@ app = Flask(__name__)
 # Variable global para almacenar el URL capturado por el listener
 link_url_global = None
 
-# --- Función Asíncrona de Extracción con Playwright (Plan RÁPIDO) ---
-async def extract_link_url_async(video_url):
+# ======================================================================
+# --- PLAN A: DETECTIVE RÁPIDO (YT-DLP) ---
+# (Se ejecuta primero)
+# ======================================================================
+def extract_with_yt_dlp(target_url):
+    print(f"[Plan A: yt-dlp] Intentando extracción rápida de: {target_url}")
+    
+    command = [
+        'python3', '-m', 'yt_dlp',
+        '-g',                          # Obtener solo la URL
+        '--no-warnings',               # No mostrar advertencias
+        '--socket-timeout', '10',     # Timeout de red de 10s
+        '-f', 'best[ext=mp4]/best',    # El formato que queremos
+        '--no-playlist',               # ¡MODIFICACIÓN! No extraer playlists, solo el video principal
+        target_url                     # La URL
+    ]
+    
+    try:
+        # Ejecutar el comando
+        result = subprocess.run(command, capture_output=True, text=True, check=True, timeout=20)
+        
+        # stdout puede tener MÚLTIPLES enlaces, uno por línea
+        # Lo separamos por el salto de línea '\n'
+        all_links = result.stdout.strip().split('\n')
+        
+        # Tomamos solo el PRIMER enlace válido de la lista
+        if all_links and all_links[0].startswith('http'):
+            first_link = all_links[0]
+            print(f"[Plan A: yt-dlp] ¡Éxito! {len(all_links)} enlaces encontrados. Devolviendo el primero: {first_link}")
+            return first_link
+        else:
+            print("[Plan A: yt-dlp] yt-dlp se ejecutó pero no devolvió un enlace http.")
+            return None # No se encontró ningún enlace válido
+
+    except Exception as e:
+        # Fallo de yt-dlp (ej. "Unsupported URL")
+        print(f"[Plan A: yt-dlp] Falló (normal para sitios difíciles o playlists vacías).")
+        return None # Indica que el Plan A falló
+
+# ======================================================================
+# --- PLAN B: ROBOT LENTO (PLAYWRIGHT) ---
+# (Se ejecuta SOLO SI el Plan A falla)
+# ======================================================================
+async def extract_with_playwright_async(video_url): # <--- Este es el nombre correcto
     global link_url_global
     link_url_global = None
-    print(f"[Playwright] Iniciando extracción (Plan RÁPIDO) para: {video_url}")
+    print(f"[Plan B: Playwright] Iniciando extracción (Plan Rápido) para: {video_url}")
     
-    # --- MODIFICACIÓN DE VELOCIDAD (1) ---
-    # Creamos un "Evento" de asyncio.
-    # Esto es como una bandera que podemos levantar.
+    # Creamos un "Evento" (bandera)
     link_found_event = asyncio.Event()
 
     async with async_playwright() as p:
@@ -31,76 +72,67 @@ async def extract_link_url_async(video_url):
                 global link_url_global
                 url = request.url
                 
-                # --- MODIFICACIÓN DE FILTRO (.mp4) ---
-                # Ahora busca .m3u8 O .mp4
+                # Busca .m3u8 O .mp4
                 if (".m3u8" in url or ".mp4" in url) and "chunklist" not in url:
                     if not link_url_global:
                         link_type = ".mp4" if ".mp4" in url else ".m3u8"
-                        print(f"[Playwright] ¡{link_type} Detectado!: {url}")
+                        print(f"[Plan B: Playwright] ¡{link_type} Detectado!: {url}")
                         link_url_global = url
-                        
-                        # --- MODIFICACIÓN DE VELOCIDAD (2) ---
-                        # Levanta la "bandera" para avisar que ya lo tenemos
+                        # Levanta la "bandera"
                         event.set()
             
-            # Le pasamos el evento al listener usando lambda
             page.on("request", lambda req: log_request(req, link_found_event))
             
             # 3. Navegar a la página
-            print("[Playwright] Navegando a la página...")
-            await page.goto(video_url, wait_until="load", timeout=30000) # 30s para cargar
+            print("[Plan B: Playwright] Navegando a la página...")
+            await page.goto(video_url, wait_until="load", timeout=30000)
             
-            # 4. Lógica de Clic (Sigue siendo el Plan D, robusto)
+            # 4. Lógica de Clic (Robusta)
             try:
-                # 1. Intentamos encontrar un iframe (selector simple) con menos tiempo
-                print("[Playwright] Buscando 'iframe' (7s)...")
+                # 1. Intentamos encontrar un iframe
+                print("[Plan B: Playwright] Buscando 'iframe' (7s)...")
                 video_iframe = await page.wait_for_selector('iframe', timeout=7000) 
                 
-                print("[Playwright] Iframe encontrado. Entrando y haciendo clic.")
+                print("[Plan B: Playwright] Iframe encontrado. Entrando y haciendo clic.")
                 iframe_content = await video_iframe.content_frame()
                 
                 if iframe_content:
                     await iframe_content.mouse.click(x=300, y=300)
-                    print("[Playwright] Clic en iframe. Esperando M3U8/MP4...")
+                    print("[Plan B: Playwright] Clic en iframe. Esperando enlace...")
                 else:
-                    # Si el iframe está vacío, clic en el body
-                    print("[Playwright] Iframe vacío, clic en body.")
+                    print("[Plan B: Playwright] Iframe vacío, clic en body.")
                     await page.click('body', force=True, position={'x': 500, 'y': 500})
-                    print("[Playwright] Clic en body. Esperando M3U8/MP4...")
+                    print("[Plan B: Playwright] Clic en body. Esperando enlace...")
 
             except Exception as e:
-                # 2. Si NO se encuentra iframe (Timeout), no es un error fatal.
-                print(f"[Playwright] No se encontró iframe (o error: {e}).")
-                print("[Playwright] Asumiendo video en página principal. Clic en body.")
+                # 2. Si NO se encuentra iframe (Timeout), clic en el body
+                print(f"[Plan B: Playwright] No se encontró iframe (o error: {e}).")
+                print("[Plan B: Playwright] Asumiendo video en página principal. Clic en body.")
                 await page.click('body', force=True, position={'x': 500, 'y': 500})
-                print("[Playwright] Clic en body. Esperando M3U8/MP4...")
+                print("[Plan B: Playwright] Clic en body. Esperando enlace...")
             
-            # --- MODIFICACIÓN DE VELOCIDAD (3) ---
-            # En lugar de un sleep(12), esperamos el evento.
-            # Esperará HASTA 15 segundos a que se levante la bandera.
-            # Si la bandera se levanta en 3 segundos, continúa al instante.
-            # Si no, se rendirá a los 15 segundos (timeout).
+            # 5. Espera Inteligente
             try:
-                print("[Playwright] Esperando por el enlace (máx 15s)...")
+                print("[Plan B: Playwright] Esperando por el enlace (máx 15s)...")
                 await asyncio.wait_for(link_found_event.wait(), timeout=15.0)
-                print("[Playwright] ¡Enlace capturado! Continuando...")
+                print("[Plan B: Playwright] ¡Enlace capturado!")
             except asyncio.TimeoutError:
-                print("[Playwright] Timeout de 15s alcanzado. No se capturó enlace.")
-            # --- FIN DE MODIFICACIONES ---
+                print("[Plan B: Playwright] Timeout de 15s alcanzado. No se capturó enlace.")
 
         except Exception as e:
-            # Error crítico de navegación o Playwright
-            print(f"[Playwright] Error Crítico: {e}")
+            print(f"[Plan B: Playwright] Error Crítico: {e}")
             return f"Error de Playwright (Crítico): {e}"
             
         finally:
             if 'browser' in locals() and browser:
                 await browser.close()
-                print("[Playwright] Navegador cerrado.")
+                print("[Plan B: Playwright] Navegador cerrado.")
                 
         return link_url_global
 
-# --- Endpoint del API (Flask) ---
+# ======================================================================
+# --- ENDPOINT PRINCIPAL (El Cerebro) ---
+# ======================================================================
 @app.route('/extract', methods=['POST'])
 def handle_extract():
     data = request.get_json()
@@ -109,16 +141,27 @@ def handle_extract():
 
     video_url = data['url']
     
-    # Ejecutamos la función asíncrona (Plan RÁPIDO)
-    link = asyncio.run(extract_link_url_async(video_url))
-
-    # Devolver el resultado
+    # --- LÓGICA INTELIGENTE ---
+    
+    # 1. Intentar Plan A (rápido, yt-dlp)
+    link = extract_with_yt_dlp(video_url)
+    
+    # 2. Si Plan A falló (devuelve None), probar Plan B (lento, Playwright)
+    if not link:
+        print("[Cerebro] Plan A (yt-dlp) falló. Iniciando Plan B (Playwright)...")
+        
+        # --- ¡AQUÍ ESTÁ LA CORRECCIÓN! ---
+        # Antes decía: extract_link_url_async
+        # Ahora dice:  extract_with_playwright_async
+        link = asyncio.run(extract_with_playwright_async(video_url))
+    
+    # 3. Devolver el resultado
     if link and isinstance(link, str) and ("http" in link):
-        # Cambiamos la llave a "m3u8_url" para no romper tu app de Node.js
+        # Éxito (de A o B)
         return jsonify({"status": "success", "m3u8_url": link, "original_url": video_url}), 200
     else:
-        # En caso de no encontrar nada o si hay un error
-        message = link if link and "Error" in link else "No se pudo detectar el enlace .m3u8 o .mp4 (Timeout)."
+        # Ambos planes fallaron
+        message = link if link and "Error" in link else "No se pudo detectar el enlace (Ambos planes fallaron)."
         return jsonify({"status": "error", "m3u8_url": None, "message": message}), 500
 
 # --- Inicio del Servidor ---
