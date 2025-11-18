@@ -50,13 +50,13 @@ def extract_with_yt_dlp(target_url):
         return None # Indica que el Plan A falló
 
 # ======================================================================
-# --- PLAN B: ROBOT LENTO (PLAYWRIGHT) ---
+# --- PLAN B: ROBOT AGRESIVO (PLAYWRIGHT) ---
 # (Se ejecuta SOLO SI el Plan A falla)
 # ======================================================================
-async def extract_with_playwright_async(video_url): # <--- Este es el nombre correcto
+async def extract_with_playwright_async(video_url):
     global link_url_global
     link_url_global = None
-    print(f"[Plan B: Playwright] Iniciando extracción (Plan Rápido) para: {video_url}")
+    print(f"[Plan B: Playwright] Iniciando extracción AGRESIVA para: {video_url}")
     
     # Creamos un "Evento" (bandera)
     link_found_event = asyncio.Event()
@@ -65,6 +65,16 @@ async def extract_with_playwright_async(video_url): # <--- Este es el nombre cor
         try:
             browser = await p.chromium.launch(headless=True)
             context = await browser.new_context()
+
+            # --- ¡NUEVO! MANEJADOR DE POP-UPS ---
+            # Se activa CADA VEZ que la página intenta abrir una nueva pestaña
+            async def handle_popup(popup):
+                print(f"[Plan B: Playwright] Popup detectado. Cerrando: {popup.url}")
+                await popup.close()
+            
+            context.on("popup", handle_popup)
+            # --- FIN DEL MANEJADOR ---
+
             page = await context.new_page()
 
             # 2. Configurar el monitoreo del tráfico de red (Listener)
@@ -87,37 +97,60 @@ async def extract_with_playwright_async(video_url): # <--- Este es el nombre cor
             print("[Plan B: Playwright] Navegando a la página...")
             await page.goto(video_url, wait_until="load", timeout=30000)
             
-            # 4. Lógica de Clic (Robusta)
+            # 4. --- ¡NUEVO! Lógica de Clics Múltiples (Agresiva) ---
+            target_frame = page # Por defecto, es la página principal
+            
             try:
-                # 1. Intentamos encontrar un iframe
+                # 4.1. Intentamos encontrar un iframe
                 print("[Plan B: Playwright] Buscando 'iframe' (7s)...")
                 video_iframe = await page.wait_for_selector('iframe', timeout=7000) 
                 
-                print("[Plan B: Playwright] Iframe encontrado. Entrando y haciendo clic.")
+                print("[Plan B: Playwright] Iframe encontrado. Apuntando al iframe.")
                 iframe_content = await video_iframe.content_frame()
                 
                 if iframe_content:
-                    await iframe_content.mouse.click(x=300, y=300)
-                    print("[Plan B: Playwright] Clic en iframe. Esperando enlace...")
+                    target_frame = iframe_content # El objetivo es el iframe
                 else:
-                    print("[Plan B: Playwright] Iframe vacío, clic en body.")
-                    await page.click('body', force=True, position={'x': 500, 'y': 500})
-                    print("[Plan B: Playwright] Clic en body. Esperando enlace...")
-
-            except Exception as e:
-                # 2. Si NO se encuentra iframe (Timeout), clic en el body
-                print(f"[Plan B: Playwright] No se encontró iframe (o error: {e}).")
-                print("[Plan B: Playwright] Asumiendo video en página principal. Clic en body.")
-                await page.click('body', force=True, position={'x': 500, 'y': 500})
-                print("[Plan B: Playwright] Clic en body. Esperando enlace...")
+                    print("[Plan B: Playwright] Iframe vacío. Se usará el body de la página principal.")
             
-            # 5. Espera Inteligente
-            try:
-                print("[Plan B: Playwright] Esperando por el enlace (máx 15s)...")
-                await asyncio.wait_for(link_found_event.wait(), timeout=15.0)
-                print("[Plan B: Playwright] ¡Enlace capturado!")
-            except asyncio.TimeoutError:
-                print("[Plan B: Playwright] Timeout de 15s alcanzado. No se capturó enlace.")
+            except Exception as e:
+                # 4.2. Si NO se encuentra iframe, el objetivo sigue siendo la página principal
+                print(f"[Plan B: Playwright] No se encontró iframe (o error: {e}).")
+                print("[Plan B: Playwright] Asumiendo video en página principal (body).")
+
+            # 4.3. Bucle de clics agresivos
+            for i in range(1, 4): # Hará 3 clics
+                if link_url_global: # Si ya encontramos el link, no seguimos
+                    print(f"[Plan B: Playwright] Enlace encontrado, deteniendo clics.")
+                    break
+                
+                print(f"[Plan B: Playwright] Clic Agresivo #{i}/3...")
+                try:
+                    # Usamos 'click' en el frame/página con una posición central
+                    # 'force=True' ignora si algo está encima (como un overlay)
+                    if target_frame == page:
+                        # Si es la página principal, usamos el 'body'
+                        await page.click('body', force=True, position={'x': 500, 'y': 500})
+                    else:
+                        # Si es un iframe, usamos coordenadas relativas
+                        await target_frame.mouse.click(x=300, y=300)
+                    
+                    print(f"[Plan B: Playwright] Clic #{i} realizado. Esperando 2 segundos...")
+                    await page.wait_for_timeout(2000) # Espera de 2 segundos
+                
+                except Exception as e:
+                    print(f"[Plan B: Playwright] Error durante el clic #{i}: {e}")
+                    # Si el frame desaparece o hay un error, esperamos e intentamos el siguiente
+                    await page.wait_for_timeout(2000)
+            
+            # 5. Espera Inteligente (después de los clics)
+            if not link_url_global: # Si los clics no lo activaron, esperamos un poco más
+                try:
+                    print("[Plan B: Playwright] Clics finalizados. Esperando por el enlace (máx 15s)...")
+                    await asyncio.wait_for(link_found_event.wait(), timeout=15.0)
+                    print("[Plan B: Playwright] ¡Enlace capturado!")
+                except asyncio.TimeoutError:
+                    print("[Plan B: Playwright] Timeout de 15s alcanzado. No se capturó enlace.")
 
         except Exception as e:
             print(f"[Plan B: Playwright] Error Crítico: {e}")
@@ -150,9 +183,7 @@ def handle_extract():
     if not link:
         print("[Cerebro] Plan A (yt-dlp) falló. Iniciando Plan B (Playwright)...")
         
-        # --- ¡AQUÍ ESTÁ LA CORRECCIÓN! ---
-        # Antes decía: extract_link_url_async
-        # Ahora dice:  extract_with_playwright_async
+        # Ejecutar la función asyncio de Playwright
         link = asyncio.run(extract_with_playwright_async(video_url))
     
     # 3. Devolver el resultado
