@@ -23,6 +23,7 @@ def extract_with_yt_dlp(target_url):
         '--no-warnings',               # No mostrar advertencias
         '--socket-timeout', '10',     # Timeout de red de 10s
         '-f', 'best[ext=mp4]/best',    # El formato que queremos
+        '--no-playlist',               # ¡MODIFICACIÓN! No extraer playlists, solo el video principal
         target_url                     # La URL
     ]
     
@@ -34,7 +35,6 @@ def extract_with_yt_dlp(target_url):
         # Lo separamos por el salto de línea '\n'
         all_links = result.stdout.strip().split('\n')
         
-        # --- ¡MODIFICACIÓN CLAVE! ---
         # Tomamos solo el PRIMER enlace válido de la lista
         if all_links and all_links[0].startswith('http'):
             first_link = all_links[0]
@@ -53,7 +53,7 @@ def extract_with_yt_dlp(target_url):
 # --- PLAN B: ROBOT LENTO (PLAYWRIGHT) ---
 # (Se ejecuta SOLO SI el Plan A falla)
 # ======================================================================
-async def extract_with_playwright_async(video_url):
+async def extract_with_playwright_async(video_url): # <--- Este es el nombre correcto
     global link_url_global
     link_url_global = None
     print(f"[Plan B: Playwright] Iniciando extracción (Plan Rápido) para: {video_url}")
@@ -149,7 +149,11 @@ def handle_extract():
     # 2. Si Plan A falló (devuelve None), probar Plan B (lento, Playwright)
     if not link:
         print("[Cerebro] Plan A (yt-dlp) falló. Iniciando Plan B (Playwright)...")
-        link = asyncio.run(extract_link_url_async(video_url))
+        
+        # --- ¡AQUÍ ESTÁ LA CORRECCIÓN! ---
+        # Antes decía: extract_link_url_async
+        # Ahora dice:  extract_with_playwright_async
+        link = asyncio.run(extract_with_playwright_async(video_url))
     
     # 3. Devolver el resultado
     if link and isinstance(link, str) and ("http" in link):
