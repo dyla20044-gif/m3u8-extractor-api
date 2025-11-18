@@ -1,7 +1,7 @@
 import os
 import json
 import asyncio
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify # Se mantiene jsonify, pero no se usa en el endpoint
 from playwright.async_api import async_playwright
 
 app = Flask(__name__)
@@ -103,9 +103,12 @@ async def extract_link_url_async(video_url):
 # --- Endpoint del API (Flask) ---
 @app.route('/extract', methods=['POST'])
 def handle_extract():
-    data = request.get_json()
+    data = request.get_json(silent=True) # Usar silent=True para evitar errores si no es JSON
+    
+    # Manejar el caso de solicitud mal formada
     if not data or 'url' not in data:
-        return jsonify({"error": "Falta el campo 'url' en el cuerpo de la solicitud."}), 400
+        # Devuelve solo el error como texto con estado 400
+        return "Error: Falta el campo 'url' en el cuerpo de la solicitud.", 400
 
     video_url = data['url']
     
@@ -114,12 +117,13 @@ def handle_extract():
 
     # Devolver el resultado
     if link and isinstance(link, str) and ("http" in link):
-        # Cambiamos la llave a "m3u8_url" para no romper tu app de Node.js
-        return jsonify({"status": "success", "m3u8_url": link, "original_url": video_url}), 200
+        # **CAMBIO CLAVE:** Devuelve solo el string del enlace con status 200
+        return link, 200
     else:
         # En caso de no encontrar nada o si hay un error
+        # Devuelve solo el mensaje de error como texto con status 500
         message = link if link and "Error" in link else "No se pudo detectar el enlace .m3u8 o .mp4 (Timeout)."
-        return jsonify({"status": "error", "m3u8_url": None, "message": message}), 500
+        return message, 500
 
 # --- Inicio del Servidor ---
 if __name__ == '__main__':
