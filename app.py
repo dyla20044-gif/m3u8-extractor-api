@@ -4,10 +4,10 @@ import asyncio
 import subprocess
 from flask import Flask, request, jsonify
 
-### LIBRERÍAS DE OPTIMIZACIÓN ###
-import requests  # Para solicitudes HTTP rápidas
-import re        # Para expresiones regulares rápidas
-### FIN LIBRERÍAS ###
+### CAMBIOS AQUÍ ###
+import requests  # Importar la librería requests
+import re        # Importar la librería de expresiones regulares
+### FIN CAMBIOS ###
 
 from playwright.async_api import async_playwright
 
@@ -18,19 +18,18 @@ link_url_global = None
 
 # ======================================================================
 # --- PLAN A: DETECTIVE RÁPIDO (YT-DLP) ---
-# (Se ejecuta primero - Rápido y General)
 # ======================================================================
 def extract_with_yt_dlp(target_url):
     print(f"[Plan A: yt-dlp] Intentando extracción rápida de: {target_url}")
     
     command = [
         'python3', '-m', 'yt_dlp',
-        '-g',                          # Obtener solo la URL
-        '--no-warnings',               
-        '--socket-timeout', '10',     
-        '-f', 'best[ext=mp4]/best',    
-        '--no-playlist',               
-        target_url                     
+        '-g',
+        '--no-warnings',
+        '--socket-timeout', '10',
+        '-f', 'best[ext=mp4]/best',
+        '--no-playlist',
+        target_url
     ]
     
     try:
@@ -63,7 +62,7 @@ def extract_with_requests_gostream(target_url):
     
     try:
         response = requests.get(target_url, headers=headers, timeout=10)
-        response.raise_for_status() 
+        response.raise_for_status()
         html_content = response.text
         
         # Patrón para GoStream: hls2.goodstream.one/.../master.m3u8?t=...
@@ -86,7 +85,7 @@ def extract_with_requests_gostream(target_url):
 
 # ======================================================================
 # --- PLAN C: ROBOT LENTO (PLAYWRIGHT) ---
-# (Se ejecuta SOLO SI los Planes A y B fallan - Último recurso, puede fallar por memoria)
+# (Timeouts AGRESIVAMENTE REDUCIDOS - Último recurso)
 # ======================================================================
 async def extract_with_playwright_async(video_url):
     global link_url_global
@@ -97,7 +96,7 @@ async def extract_with_playwright_async(video_url):
 
     async with async_playwright() as p:
         try:
-            # Aplicamos los Timeouts reducidos (4s y 8s)
+            # Lanzamos Chromium
             browser = await p.chromium.launch(headless=True)
             context = await browser.new_context()
             page = await context.new_page()
@@ -122,8 +121,11 @@ async def extract_with_playwright_async(video_url):
             
             # 4. Lógica de Clic (Robusta)
             try:
-                print("[Plan C: Playwright] Buscando 'iframe' (4s)...")
-                video_iframe = await page.wait_for_selector('iframe', timeout=4000) # Timeout 4s
+                # 1. Intentamos encontrar un iframe
+                print("[Plan C: Playwright] Buscando 'iframe' (2s)...")
+                video_iframe = await page.wait_for_selector('iframe', timeout=2000) # Timeout 2s (AGRESIVO)
+                
+                print("[Plan C: Playwright] Iframe encontrado. Entrando y haciendo clic.")
                 iframe_content = await video_iframe.content_frame()
                 
                 if iframe_content:
@@ -134,16 +136,18 @@ async def extract_with_playwright_async(video_url):
                     print("[Plan C: Playwright] Clic en body. Esperando enlace...")
 
             except Exception as e:
+                # 2. Si NO se encuentra iframe (Timeout), clic en el body
                 print(f"[Plan C: Playwright] No se encontró iframe (o error: {e}).")
+                print("[Plan C: Playwright] Asumiendo video en página principal. Clic en body.")
                 await page.click('body', force=True, position={'x': 500, 'y': 500})
             
             # 5. Espera Inteligente
             try:
-                print("[Plan C: Playwright] Esperando por el enlace (máx 8s)...")
-                await asyncio.wait_for(link_found_event.wait(), timeout=8.0) # Timeout 8s
+                print("[Plan C: Playwright] Esperando por el enlace (máx 4s)...")
+                await asyncio.wait_for(link_found_event.wait(), timeout=4.0) # Timeout 4s (AGRESIVO)
                 print("[Plan C: Playwright] ¡Enlace capturado!")
             except asyncio.TimeoutError:
-                print("[Plan C: Playwright] Timeout de 8s alcanzado. No se capturó enlace.")
+                print("[Plan C: Playwright] Timeout de 4s alcanzado. No se capturó enlace.")
 
         except Exception as e:
             print(f"[Plan C: Playwright] Error Crítico: {e}")
