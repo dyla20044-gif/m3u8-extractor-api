@@ -4,10 +4,10 @@ import asyncio
 import subprocess
 from flask import Flask, request, jsonify
 
-### CAMBIOS AQUÍ ###
-import requests  # Importar la librería requests
-import re        # Importar la librería de expresiones regulares
-### FIN CAMBIOS ###
+### LIBRERÍAS DE OPTIMIZACIÓN ###
+import requests  # Para solicitudes HTTP rápidas
+import re        # Para expresiones regulares rápidas
+### FIN LIBRERÍAS ###
 
 from playwright.async_api import async_playwright
 
@@ -51,7 +51,7 @@ def extract_with_yt_dlp(target_url):
 
 # ======================================================================
 # --- PLAN B: BÚSQUEDA RÁPIDA EN HTML (requests + re) - GoStream
-# (Ultrarrápido, funciona si el enlace está impreso en el HTML)
+# (¡CORREGIDO! - Ultrarrápido, funciona si el enlace está impreso en el HTML)
 # ======================================================================
 def extract_with_requests_gostream(target_url):
     print(f"[Plan B: Requests Fast - GoStream] Intentando extracción de token en HTML para: {target_url}")
@@ -65,8 +65,8 @@ def extract_with_requests_gostream(target_url):
         response.raise_for_status()
         html_content = response.text
         
-        # Patrón para GoStream: hls2.goodstream.one/.../master.m3u8?t=...
-        pattern = r"(https:\/\/hls\d?\.goodstream\.one\/[^\s]+?\.m3u8\?t=[^\s\"]+)"
+        # PATRÓN CORREGIDO Y ROBUSTO para GoStream: Captura la URL completa tokenizada.
+        pattern = r"(https?:\/\/[a-zA-Z0-9-]+\.goodstream\.one\/[^\s\"']+\.m3u8\?[^\s\"']+)"
         
         match = re.search(pattern, html_content)
         
@@ -85,7 +85,7 @@ def extract_with_requests_gostream(target_url):
 
 # ======================================================================
 # --- PLAN C: ROBOT LENTO (PLAYWRIGHT) ---
-# (Timeouts AGRESIVAMENTE REDUCIDOS - Último recurso)
+# (Timeouts AGRESIVAMENTE REDUCIDOS - Último recurso, para Vimeos y otros)
 # ======================================================================
 async def extract_with_playwright_async(video_url):
     global link_url_global
@@ -96,7 +96,7 @@ async def extract_with_playwright_async(video_url):
 
     async with async_playwright() as p:
         try:
-            # Lanzamos Chromium
+            # Aplicamos los Timeouts agresivos (2s y 4s)
             browser = await p.chromium.launch(headless=True)
             context = await browser.new_context()
             page = await context.new_page()
@@ -123,7 +123,7 @@ async def extract_with_playwright_async(video_url):
             try:
                 # 1. Intentamos encontrar un iframe
                 print("[Plan C: Playwright] Buscando 'iframe' (2s)...")
-                video_iframe = await page.wait_for_selector('iframe', timeout=2000) # Timeout 2s (AGRESIVO)
+                video_iframe = await page.wait_for_selector('iframe', timeout=2000) # Timeout 2s 
                 
                 print("[Plan C: Playwright] Iframe encontrado. Entrando y haciendo clic.")
                 iframe_content = await video_iframe.content_frame()
@@ -144,7 +144,7 @@ async def extract_with_playwright_async(video_url):
             # 5. Espera Inteligente
             try:
                 print("[Plan C: Playwright] Esperando por el enlace (máx 4s)...")
-                await asyncio.wait_for(link_found_event.wait(), timeout=4.0) # Timeout 4s (AGRESIVO)
+                await asyncio.wait_for(link_found_event.wait(), timeout=4.0) # Timeout 4s 
                 print("[Plan C: Playwright] ¡Enlace capturado!")
             except asyncio.TimeoutError:
                 print("[Plan C: Playwright] Timeout de 4s alcanzado. No se capturó enlace.")
