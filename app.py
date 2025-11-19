@@ -61,11 +61,12 @@ def extract_with_requests_gostream(target_url):
     }
     
     try:
+        # Nota: requests.get sigue redirects por defecto, esto manejará enlaces cortos y largos.
         response = requests.get(target_url, headers=headers, timeout=10)
         response.raise_for_status()
         html_content = response.text
         
-        # PATRÓN CORREGIDO Y ROBUSTO para GoStream: Captura la URL completa tokenizada.
+        # PATRÓN CORREGIDO: Busca la URL tokenizada en cualquier subdominio de goodstream.one
         pattern = r"(https?:\/\/[a-zA-Z0-9-]+\.goodstream\.one\/[^\s\"']+\.m3u8\?[^\s\"']+)"
         
         match = re.search(pattern, html_content)
@@ -172,31 +173,42 @@ def handle_extract():
 
     video_url = data['url']
     link = None
+    used_plan = None # Variable para registrar el plan usado
     
     # --- LÓGICA INTELIGENTE (TRES PLANES DE VELOCIDAD) ---
     
     # 1. Plan A: Intentar yt-dlp (rápido, general)
     link = extract_with_yt_dlp(video_url)
+    if link:
+        used_plan = "A (yt-dlp)"
     
     # 2. Plan B: Si Plan A falló, probar el optimizado para GoStream (Ultrarrápido)
     if not link and "goodstream" in video_url:
         print("[Cerebro] Plan A falló. Iniciando Plan B (Requests Fast - GoStream)...")
         link = extract_with_requests_gostream(video_url)
+        if link:
+            used_plan = "B (Requests Fast - GoStream)"
         
     # 3. Plan C: Si Plan A y B fallaron, usar Plan C (Playwright Lento - el último recurso)
     if not link:
         print("[Cerebro] Plan A/B fallaron. Iniciando Plan C (Playwright Lento)...")
         # El código asíncrono debe envolverse en asyncio.run()
-        link = asyncio.run(extract_with_playwright_async(video_url)) 
+        link = asyncio.run(extract_with_playwright_async(video_url))
+        if link:
+             used_plan = "C (Playwright Lento)"
     
-    # 4. Devolver el resultado
+    # 4. Devolver el resultado (AÑADIMOS used_plan a la respuesta JSON)
     if link and isinstance(link, str) and ("http" in link):
         # Éxito (de A, B o C)
-        return jsonify({"status": "success", "m3u8_url": link, "original_url": video_url}), 200
+        return jsonify({"status": "success", 
+                        "m3u8_url": link, 
+                        "original_url": video_url,
+                        "plan_used": used_plan # CLAVE AÑADIDA
+                       }), 200
     else:
         # Todos los planes fallaron
         message = link if link and "Error" in link else "No se pudo detectar el enlace (Todos los planes fallaron)."
-        return jsonify({"status": "error", "m3u8_url": None, "message": message}), 500
+        return jsonify({"status": "error", "m3u8_url": None, "message": message, "plan_used": used_plan}), 500
 
 # --- Inicio del Servidor ---
 if __name__ == '__main__':
