@@ -180,8 +180,9 @@ async def extract_with_playwright_async(video_url):
                 iframe_content = await video_iframe.content_frame()
                 
                 if iframe_content:
-                    await iframe_content.mouse.click(x=300, y=300)
-                    print("[Plan D: Playwright] Clic en iframe. Esperando enlace...")
+                    # ✅ CAMBIO REALIZADO: Clic robusto en el body del iframe.
+                    await iframe_content.click('body', force=True)
+                    print("[Plan D: Playwright] Clic robusto en iframe ejecutado.")
                 else:
                     await page.click('body', force=True, position={'x': 500, 'y': 500})
                     print("[Plan D: Playwright] Clic en body. Esperando enlace...")
