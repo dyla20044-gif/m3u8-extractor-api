@@ -147,7 +147,7 @@ async def extract_with_playwright_async(video_url):
 
     async with async_playwright() as p:
         try:
-            # Aplicamos los Timeouts agresivos (2s y 4s)
+            # Aplicamos los Timeouts agresivos (2s y 7s)
             browser = await p.chromium.launch(headless=True)
             context = await browser.new_context()
             page = await context.new_page()
@@ -180,26 +180,29 @@ async def extract_with_playwright_async(video_url):
                 iframe_content = await video_iframe.content_frame()
                 
                 if iframe_content:
-                    # ✅ CAMBIO REALIZADO: Clic robusto en el body del iframe.
+                    # ✅ CORRECCIÓN 1 (Aplica el fix anterior): Clic robusto en el body del iframe.
                     await iframe_content.click('body', force=True)
                     print("[Plan D: Playwright] Clic robusto en iframe ejecutado.")
                 else:
-                    await page.click('body', force=True, position={'x': 500, 'y': 500})
+                    # ✅ CORRECCIÓN 2: Clic robusto en el body de la página principal (sin coordenadas).
+                    await page.click('body', force=True) 
                     print("[Plan D: Playwright] Clic en body. Esperando enlace...")
 
             except Exception as e:
                 # 2. Si NO se encuentra iframe (Timeout), clic en el body
                 print(f"[Plan D: Playwright] No se encontró iframe (o error: {e}).")
-                print("[Plan D: Playwright] Asumiendo video en página principal. Clic en body.")
-                await page.click('body', force=True, position={'x': 500, 'y': 500})
+                print("[Plan D: Playwright] Asumiendo video en página principal. Clic robusto en body.")
+                # ✅ CORRECCIÓN 3: Clic robusto en el body de la página principal (sin coordenadas).
+                await page.click('body', force=True)
             
             # 5. Espera Inteligente
             try:
-                print("[Plan D: Playwright] Esperando por el enlace (máx 4s)...")
-                await asyncio.wait_for(link_found_event.wait(), timeout=4.0) # Timeout 4s 
+                print("[Plan D: Playwright] Esperando por el enlace (máx 7s)...")
+                # ✅ CORRECCIÓN 4: Aumentamos el timeout a 7.0 segundos.
+                await asyncio.wait_for(link_found_event.wait(), timeout=7.0) 
                 print("[Plan D: Playwright] ¡Enlace capturado!")
             except asyncio.TimeoutError:
-                print("[Plan D: Playwright] Timeout de 4s alcanzado. No se capturó enlace.")
+                print("[Plan D: Playwright] Timeout de 7s alcanzado. No se capturó enlace.")
 
         except Exception as e:
             print(f"[Plan D: Playwright] Error Crítico: {e}")
